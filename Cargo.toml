@@ -1,6 +1,6 @@
 [package]
-name = "darkfi-map-contract"
-version = "0.4.1"
+name = "darkmap"
+version = "0.1.0"
 authors = ["Dyne.org foundation <foundation@dyne.org>"]
 license = "AGPL-3.0-only"
 edition = "2021"
@@ -9,30 +9,15 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-darkfi-sdk = { path = "../../sdk" }
-darkfi-serial = { path = "../../serial", features = ["derive", "crypto"] }
+darkfi-sdk = { path = "../darkfi-master/src/sdk" }
+darkfi-serial = { path = "../darkfi-master/src/serial", features = ["derive", "crypto"] }
 thiserror = "1.0.40"
 
-# The following dependencies are used for the client API and
-# probably shouldn't be in WASM
 chacha20poly1305 = { version = "0.10.1", optional = true }
-# why is darkfi undeclared?
-darkfi = { path = "../../../", features = ["zk", "rpc", "blockchain"], optional = true }
-halo2_proofs = { version = "0.3.0", optional = true }
+darkfi = { path = "../darkfi-master", features = ["zk", "rpc", "blockchain"], optional = true }
 log = { version = "0.4.17", optional = true }
 rand = { version = "0.8.5", optional = true }
 
-# These are used just for the integration tests
-[dev-dependencies]
-async-std = {version = "1.12.0", features = ["attributes"]}
-bs58 = "0.4.0"
-darkfi = {path = "../../../", features = ["tx", "blockchain"]}
-simplelog = "0.12.1"
-sled = "0.34.7"
-sqlx = {version = "0.6.3", features = ["runtime-async-std-rustls", "sqlite"]}
-
-# We need to disable random using "custom" which makes the crate a noop
-# so the wasm32-unknown-unknown target is enabled.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2.8", features = ["custom"] }
 
@@ -44,5 +29,11 @@ client = [
     "rand",
     "chacha20poly1305",
     "log",
-    "halo2_proofs",
 ]
+
+[patch.crates-io]
+halo2_proofs = {git="https://github.com/parazyd/halo2", branch="v4"}
+halo2_gadgets = {git="https://github.com/parazyd/halo2", branch="v4"}
+arti-client = {git="https://gitlab.torproject.org/tpo/core/arti", rev="77b0dc2edc93c9ad09b833b176e0f7066f017dd1"}
+tor-hscrypto = {git="https://gitlab.torproject.org/tpo/core/arti", rev="77b0dc2edc93c9ad09b833b176e0f7066f017dd1"}
+
