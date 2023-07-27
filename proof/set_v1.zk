@@ -1,3 +1,5 @@
+k = 13;
+
 constant "Set_V1" {} 
 
 witness "Set_V1" {
