@@ -3,26 +3,41 @@ k = 13;
 constant "Set_V1" {} 
 
 witness "Set_V1" {
+        // An instance of `Base` is a field element, where it is a member of
+        // the finite field F_p where
+        // p = 0x40000000000000000000000000000000224698fc094cf91b992d30ed00000001
+        //
+        // Private input a user generates locally 
 	Base secret,
+
+	// Whether to lock the name
 	Base lock,
-	# Whether set canonical root
-	# 
-	# Be nice, don't spam
-	# setting slots in the canonical root namespace will be paid eventually
-	# but people can always choose to use an alt root
-	Base car,
+
+        // Whether to set in the canonical root name registry
+	Base root,
+
+	// The name
 	Base key,
+
+	// The value the name resolves to or
+        // the next sub name registry which is also an account
 	Base value,
 }
 
 circuit "Set_V1" {
+	// Most statements are imperactive statements:
+	// var = statement(var_or_witness1, var_or_witness2, ...);
 	account = poseidon_hash(secret);
+
+	// `constrain_instance` requires the value be provided as public input
 	constrain_instance(account);
 	constrain_instance(lock);
-	constrain_instance(car);
+	constrain_instance(root);
 	constrain_instance(key);
 	constrain_instance(value);
+
+	// Check whether `lock` and `root` are of {0, 1}
 	bool_check(lock);
-	bool_check(car);
+	bool_check(root);
 }
 
