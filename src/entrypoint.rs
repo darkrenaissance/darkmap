@@ -18,38 +18,27 @@
  */
 
 use crate::{
-    ContractFunction,
-    MAP_CONTRACT_ENTRIES_TREE,
-    MAP_CONTRACT_ZKAS_SET_NS,
-    error::MapError
+    error::MapError, ContractFunction, MAP_CONTRACT_ENTRIES_TREE, MAP_CONTRACT_ZKAS_SET_NS,
 };
 
 use darkfi_sdk::{
-    crypto::{ContractId, PublicKey, poseidon_hash},
+    crypto::{poseidon_hash, ContractId, PublicKey},
+    db::{db_get, db_init, db_lookup, db_set, zkas_db_set},
     error::{ContractError, ContractResult},
     msg,
     pasta::pallas,
-    ContractCall,
     util::set_return_data,
-    db::{db_init, db_lookup, db_set, zkas_db_set, db_get},
+    ContractCall,
 };
 
-use darkfi_serial::{
-    serialize,
-    deserialize,
-    Encodable,
-    WriteExt
-};
+use darkfi_serial::{deserialize, serialize, Encodable, WriteExt};
 
-use crate::model::{
-    SetParamsV1,
-    SetUpdateV1,
-};
+use crate::model::{SetParamsV1, SetUpdateV1};
 
 // A macro defining the 4 entrypoints
 // init:     called during (re)deployment
 // metadata: called during contract message call, first
-// exec:     second 
+// exec:     second
 // apply:    last
 darkfi_sdk::define_contract!(
     init:     init_contract,
@@ -57,7 +46,6 @@ darkfi_sdk::define_contract!(
     apply:    process_update,
     metadata: get_metadata
 );
-
 
 // init takes:
 // - the contract ID given by the runtime
@@ -83,10 +71,10 @@ fn init_contract(cid: ContractId, _ix: &[u8]) -> ContractResult {
     if db_lookup(cid, MAP_CONTRACT_ENTRIES_TREE).is_err() {
         // "Under the hood" are comments for the studious ones about how
         // something works in its implementation.
-        // 
+        //
         // Under the hood: db_init is only allowed callable inside init.
         // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/db.rs#L55-L58
-        // 
+        //
         // Under the hood: cid must match the contract ID of this contract
         // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/db.rs#L105-L108
         db_init(cid, MAP_CONTRACT_ENTRIES_TREE)?;
@@ -112,10 +100,8 @@ fn get_metadata(_cid: ContractId, ix: &[u8]) -> ContractResult {
 
     // Match on the first byte to select the function
     match ContractFunction::try_from(self_.data[0])? {
-
         // When the first byte is matched as `Set`
         ContractFunction::Set => {
-
             // Deserialize contract call, excluding the first byte
             let params: SetParamsV1 = deserialize(&self_.data[1..])?;
 
@@ -123,36 +109,31 @@ fn get_metadata(_cid: ContractId, ix: &[u8]) -> ContractResult {
             // a vector of public keys and
             // a vector of (zkas namespace, public inputs)
             let signature_pubkeys: Vec<PublicKey> = vec![];
-            let mut zk_public_inputs: Vec<(String, Vec<pallas::Base>)>
-                = vec![];
+            let mut zk_public_inputs: Vec<(String, Vec<pallas::Base>)> = vec![];
 
-            zk_public_inputs.push((
-                MAP_CONTRACT_ZKAS_SET_NS.to_string(),
-                params.to_vec(),
-            ));
-    
+            zk_public_inputs.push((MAP_CONTRACT_ZKAS_SET_NS.to_string(), params.to_vec()));
+
             // Encode the two vectors into one vector
             let mut metadata = vec![];
             zk_public_inputs.encode(&mut metadata)?;
             signature_pubkeys.encode(&mut metadata)?;
 
             // Return data to the host using an import
-            // 
-	    // Under the hood: metadata is invoked here
+            //
+            // Under the hood: metadata is invoked here
             // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/consensus/validator.rs#L1045C1-L1045C1
             //
-	    // Under the hood: The metadata is return here 
+            // Under the hood: The metadata is returned here
             // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/util.rs#L43
             set_return_data(&metadata)?;
 
-
             Ok(())
-
         }
-
     }
 }
 
+/// Taking call_idx and calls, `set_return_data` a state update to
+/// return to the host **to be applied in `process_update()`.
 fn process_instruction(cid: ContractId, ix: &[u8]) -> ContractResult {
     let (call_idx, calls): (u32, Vec<ContractCall>) = deserialize(ix)?;
     if call_idx >= calls.len() as u32 {
@@ -162,32 +143,40 @@ fn process_instruction(cid: ContractId, ix: &[u8]) -> ContractResult {
 
     match ContractFunction::try_from(ix[0])? {
         ContractFunction::Set => {
-            msg!("processing SET");
-            let params: SetParamsV1 = 
-                deserialize(&calls[call_idx as usize].data[1..])?;
+            let params: SetParamsV1 = deserialize(&calls[call_idx as usize].data[1..])?;
+
+            // Calculating the slot
+            // If the prover wants to set a top-level name,
+            // i.e. in the canonical root name registry,
+            // then slot = poseidon_hash(0, key)
             let slot = if params.car == pallas::Base::one() {
                 poseidon_hash([pallas::Base::zero(), params.key])
+            // else slot = poseidon_hash(account, key).
+            // That is, if you don't have the account's secret,
+            // you cannot write to the same slot assuming second preimage
+            // resistance.
             } else {
                 poseidon_hash([params.account, params.key])
             };
 
-            // Question being answered by this block of code:
-            // is this slot locked?
+            // Check if this slot is locked.
+            // Allow only setting unlocked slot.
             let db = db_lookup(cid, MAP_CONTRACT_ENTRIES_TREE)?;
             match db_get(db, &serialize(&slot))? {
-                None => msg!("[SET] slot has no value"),
+                None => {}
                 Some(lock) => {
                     if deserialize(&lock)? {
-                        return Err(MapError::Locked.into())
+                        return Err(MapError::Locked.into());
                     }
                 }
             };
+
             msg!("[SET] slot  = {:?}", slot);
             msg!("[SET] car   = {:?}", params.car);
             msg!("[SET] lock  = {:?}", params.lock);
             msg!("[SET] value = {:?}", params.value);
 
-
+            // Prepare the return data for the host.
             let update = SetUpdateV1 {
                 slot,
                 lock: params.lock,
@@ -196,47 +185,38 @@ fn process_instruction(cid: ContractId, ix: &[u8]) -> ContractResult {
             let mut update_data = vec![];
             update_data.write_u8(ContractFunction::Set as u8)?;
             let _ = update.encode(&mut update_data)?;
+
+            // Setting the return data for the host.
+            // Under the hood: https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/util.rs#L43
             set_return_data(&update_data)?;
-            msg!("[SET] State update set!");
 
             Ok(())
         }
     }
 }
 
-fn process_update(
-    cid: ContractId,
-    update_data: &[u8]
-) -> ContractResult {
+/// Taking the cid and the update data set in `process_instruction`,
+/// write to the relevant databases.
+/// In particular, set in db MAP_CONTRACT_ENTRIES_TREE:
+/// * slot     = lock
+/// * slot + 1 = value
+fn process_update(cid: ContractId, update_data: &[u8]) -> ContractResult {
     match ContractFunction::try_from(update_data[0])? {
         ContractFunction::Set => {
             let update: SetUpdateV1 = deserialize(&update_data[1..])?;
 
-            msg!("[SET] serialized_slot     = {:?}",
-                 &serialize(&update.slot));
-            msg!("[SET] serialized_slot + 1 = {:?}",
-                 &serialize(&(update.slot.add(&pallas::Base::one()))));
-            msg!("[SET] serialized_lock    = {:?}",
-                 &serialize(&update.lock));
-            msg!("[SET] serialized_value    = {:?}",
-                 &serialize(&update.value));
-
             // key(slot)     = lock
             // key(slot + 1) = value
             let db = db_lookup(cid, MAP_CONTRACT_ENTRIES_TREE)?;
-            db_set(
-                db,
-                &serialize(&update.slot),
-                &serialize(&update.lock),
-            ).unwrap();
+            db_set(db, &serialize(&update.slot), &serialize(&update.lock)).unwrap();
             db_set(
                 db,
                 &serialize(&(update.slot.add(&pallas::Base::one()))),
                 &serialize(&update.value),
-            ).unwrap();
+            )
+            .unwrap();
 
             Ok(())
-        },
+        }
     }
 }
-

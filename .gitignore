@@ -1,2 +1,4 @@
-map_contract.wasm
+*.wasm
 proof/*.zk.bin
+target/
+

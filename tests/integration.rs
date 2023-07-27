@@ -16,25 +16,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
-use std::time::Instant;
 use darkfi::Result;
+use darkfi_map_contract::MAP_CONTRACT_ENTRIES_TREE;
 use darkfi_sdk::{
-    crypto::{
-        poseidon_hash,
-        Keypair,
-        MerkleNode,
-        Nullifier,
-        MAP_CONTRACT_ID
-    },
+    crypto::{poseidon_hash, Keypair, MerkleNode, Nullifier, MAP_CONTRACT_ID},
     incrementalmerkletree::Tree,
     pasta::pallas,
     // db::{db_lookup, db_get} link error?
 };
-use log::{info, debug};
-use rand::rngs::OsRng;
-use darkfi_map_contract::MAP_CONTRACT_ENTRIES_TREE;
 use darkfi_serial::{deserialize, serialize};
+use log::{debug, info};
+use rand::rngs::OsRng;
+use std::time::Instant;
 
 mod harness;
 use harness::{init_logger, MapTestHarness};
