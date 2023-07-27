@@ -61,10 +61,10 @@ darkfi_sdk::define_contract!(
 
 // init takes:
 // - the contract ID given by the runtime
-// - a payload of a slice of bytes representing deployment input. In our case, there is none
+// - a payload in the form of a slice of bytes
 // then:
-// - initializes all the databases, of your choosing
-// - and bundle zkas circuits that will gate this contract's functions, of your choosing
+// - initializes all the databases
+// - and bundle zkas circuits that will gate this contract's functions
 fn init_contract(cid: ContractId, _ix: &[u8]) -> ContractResult {
     // Hardcode the `set` circuit's binary into the wasm binary
     // during the wasm module's compilation.
@@ -84,10 +84,10 @@ fn init_contract(cid: ContractId, _ix: &[u8]) -> ContractResult {
         // "Under the hood" are comments for the studious ones about how
         // something works in its implementation.
         // 
-        // Under the hood 1: db_init is only allowed callable inside init.
+        // Under the hood: db_init is only allowed callable inside init.
         // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/db.rs#L55-L58
         // 
-        // Under the hood 2: cid must match the contract ID of this contract
+        // Under the hood: cid must match the contract ID of this contract
         // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/db.rs#L105-L108
         db_init(cid, MAP_CONTRACT_ENTRIES_TREE)?;
     }
@@ -95,17 +95,33 @@ fn init_contract(cid: ContractId, _ix: &[u8]) -> ContractResult {
     Ok(())
 }
 
+// The `metadata` entrypoint takes 1) its contract ID and 2) payload,
+// but the payload is this call's index, and the calls themselves
+// then it is supposed to return the public keys and public inputs, for
+// verifying the signatures and zero knowledge proofs, respectively.
 fn get_metadata(_cid: ContractId, ix: &[u8]) -> ContractResult {
+    // Parse the index and calls from the payload
     let (call_idx, calls): (u32, Vec<ContractCall>) = deserialize(ix)?;
     if call_idx >= calls.len() as u32 {
         msg!("Error: call_idx >= calls.len()");
         return Err(ContractError::Internal);
     }
 
+    // Selects this contract call struct
     let self_ = &calls[call_idx as usize];
+
+    // Match on the first byte to select the function
     match ContractFunction::try_from(self_.data[0])? {
+
+        // When the first byte is matched as `Set`
         ContractFunction::Set => {
+
+            // Deserialize contract call, excluding the first byte
             let params: SetParamsV1 = deserialize(&self_.data[1..])?;
+
+            // Initialize two vectors to store
+            // a vector of public keys and
+            // a vector of (zkas namespace, public inputs)
             let signature_pubkeys: Vec<PublicKey> = vec![];
             let mut zk_public_inputs: Vec<(String, Vec<pallas::Base>)>
                 = vec![];
@@ -115,37 +131,28 @@ fn get_metadata(_cid: ContractId, ix: &[u8]) -> ContractResult {
                 params.to_vec(),
             ));
     
+            // Encode the two vectors into one vector
             let mut metadata = vec![];
             zk_public_inputs.encode(&mut metadata)?;
             signature_pubkeys.encode(&mut metadata)?;
 
+            // Return data to the host using an import
+            // 
+	    // Under the hood: metadata is invoked here
+            // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/consensus/validator.rs#L1045C1-L1045C1
+            //
+	    // Under the hood: The metadata is return here 
+            // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/util.rs#L43
             set_return_data(&metadata)?;
+
+
             Ok(())
+
         }
+
     }
 }
 
-/// the most imporatant things to the implementation:
-/// - there is 1 map, slot (number) -> value, so set and get are gas efficient
-/// - slot is function of a) namespace and b) key under the namespace
-///   - slot(root_namespace, darkrenaissance) = poseidon_hash(
-///                                                 0,
-///                                                 darkrenaissance
-///                                             )
-///                                           = alice_account
-///   - slot(darkrenaissance, darkfi)         = poseidon_hash(
-///                                                 alice_account,
-///                                                 darkfi
-///                                             )
-///                                           = bob_account
-///   - slot(darkfi, v0_4_1)                  = poseidon_hash(
-///                                                 bob_account,
-///                                                 v0_4_1
-///                                             )
-///                                           = value
-/// - 0 is the special account for the canonical root
-///
-///
 fn process_instruction(cid: ContractId, ix: &[u8]) -> ContractResult {
     let (call_idx, calls): (u32, Vec<ContractCall>) = deserialize(ix)?;
     if call_idx >= calls.len() as u32 {
