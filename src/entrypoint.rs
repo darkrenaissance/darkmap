@@ -46,6 +46,11 @@ use crate::model::{
     SetUpdateV1,
 };
 
+// A macro defining the 4 entrypoints
+// init:     called during (re)deployment
+// metadata: called during contract message call, first
+// exec:     second 
+// apply:    last
 darkfi_sdk::define_contract!(
     init:     init_contract,
     exec:     process_instruction,
@@ -53,18 +58,44 @@ darkfi_sdk::define_contract!(
     metadata: get_metadata
 );
 
-fn init_contract(cid: ContractId, ix: &[u8]) -> ContractResult {
+
+// init takes:
+// - the contract ID given by the runtime
+// - a payload of a slice of bytes representing deployment input. In our case, there is none
+// then:
+// - initializes all the databases, of your choosing
+// - and bundle zkas circuits that will gate this contract's functions, of your choosing
+fn init_contract(cid: ContractId, _ix: &[u8]) -> ContractResult {
+    // Hardcode the `set` circuit's binary into the wasm binary
+    // during the wasm module's compilation.
+    // TODO: do we need to update for non-native deployment?
     let set_v1_bincode = include_bytes!("../proof/set_v1.zk.bin");
+
+    // When init is called, create a verifying key for this circuit.
+    // The verifying key will later be used to verify proofs that are
+    // supposedly constrained by the `set` circuit.
     zkas_db_set(&set_v1_bincode[..])?;
 
+    // If this is a redeployment, skip the databsae initialization,
+    // initialize otherwise.
+    // We want MAP_CONTRACT_ENTRIES_TREE to store the key-value pairs of the
+    // name registries.
     if db_lookup(cid, MAP_CONTRACT_ENTRIES_TREE).is_err() {
+        // "Under the hood" are comments for the studious ones about how
+        // something works in its implementation.
+        // 
+        // Under the hood 1: db_init is only allowed callable inside init.
+        // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/db.rs#L55-L58
+        // 
+        // Under the hood 2: cid must match the contract ID of this contract
+        // https://github.com/darkrenaissance/darkfi/blob/35405831e366eaa74522ab14645a5a05ce5cfa1e/src/runtime/import/db.rs#L105-L108
         db_init(cid, MAP_CONTRACT_ENTRIES_TREE)?;
     }
 
     Ok(())
 }
 
-fn get_metadata(cid: ContractId, ix: &[u8]) -> ContractResult {
+fn get_metadata(_cid: ContractId, ix: &[u8]) -> ContractResult {
     let (call_idx, calls): (u32, Vec<ContractCall>) = deserialize(ix)?;
     if call_idx >= calls.len() as u32 {
         msg!("Error: call_idx >= calls.len()");
@@ -157,7 +188,7 @@ fn process_instruction(cid: ContractId, ix: &[u8]) -> ContractResult {
             };
             let mut update_data = vec![];
             update_data.write_u8(ContractFunction::Set as u8)?;
-            update.encode(&mut update_data);
+            let _ = update.encode(&mut update_data)?;
             set_return_data(&update_data)?;
             msg!("[SET] State update set!");
 
