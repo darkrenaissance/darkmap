@@ -2,14 +2,14 @@
 # 
 # This is the source of ZK circuit. 
 # It has 3 sections: constant, witness and circuit.
-# constant and witness describe the data the ZK statements are constraining.
+# constant and witness describe the data the ZK statements defining constraints over.
 
-# 2 ** k is the maximum nubmer of rows in the circuit.
+# Metadata: 2 ** k is the maximum nubmer of rows in the circuit.
 k = 11;
 
 # Section to declare constants used in the circuit.
 # "Set_V1" is the namepsace of circuit. 
-# It is the namespace for storing verifying key onchain.
+# It is the namespace for storing the verifying key onchain.
 constant "Set_V1" {} 
 
 # Witness is the inputs to the circuit, both public and private.
